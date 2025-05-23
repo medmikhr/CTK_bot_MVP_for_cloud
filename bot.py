@@ -3,7 +3,7 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from dotenv import load_dotenv
-from document_processor_langchain import process_document, search_documents, get_document_info
+from document_processor_langchain import process_document, get_document_info
 from agent import agent_ask
 
 # Загрузка переменных окружения
@@ -160,12 +160,28 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
-    user_id = update.effective_user.id
-    text = update.message.text
-    
-    # Передаем запрос агенту
-    response = agent_ask(user_id, text)
-    await update.message.reply_text(response.content)
+    try:
+        user_id = update.effective_user.id
+        text = update.message.text
+        
+        # Отправляем сообщение о том, что запрос обрабатывается
+        processing_message = await update.message.reply_text("🤔 Обрабатываю ваш запрос...")
+        
+        # Передаем запрос агенту
+        response = agent_ask(user_id, text)
+        
+        # Удаляем сообщение о обработке
+        await processing_message.delete()
+        
+        # Отправляем ответ
+        await update.message.reply_text(response.content)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при обработке текстового сообщения: {e}")
+        await update.message.reply_text(
+            "❌ Произошла ошибка при обработке вашего запроса. "
+            "Пожалуйста, попробуйте еще раз или обратитесь к администратору."
+        )
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик нажатий на кнопки"""
@@ -182,6 +198,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Отвечаем на callback query
     await query.answer()
 
+async def handle_other_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик для всех остальных типов сообщений"""
+    await update.message.reply_text(
+        "❌ Я могу обрабатывать только текстовые сообщения и документы.\n"
+        "Пожалуйста, отправьте текстовый запрос или документ."
+    )
+
 def main():
     """Основная функция запуска бота"""
     # Создаем приложение
@@ -194,7 +217,8 @@ def main():
     application.add_handler(CommandHandler("docs_list", docs_list))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.add_handler(CallbackQueryHandler(button_callback))  # Добавляем обработчик кнопок
+    application.add_handler(MessageHandler(filters.ALL, handle_other_messages))  # Обработчик для всех остальных типов сообщений
+    application.add_handler(CallbackQueryHandler(button_callback))  # Обработчик кнопок
     
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES)
