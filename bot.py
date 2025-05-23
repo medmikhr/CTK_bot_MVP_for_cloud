@@ -21,16 +21,37 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 if not TOKEN:
     raise ValueError("Не найден токен бота в переменных окружения")
 
+# Словарь коллекций и их пользователей
+COLLECTIONS = {
+    "ctk": [
+        673473862,  # Замените на реальные ID пользователей ЦТК
+    ],
+    "sbf": [
+        135727236,  # Замените на реальные ID пользователей СБФ
+    ]
+}
+
 # Словарь для хранения состояний пользователей
 user_states = {}
 
-def get_main_keyboard():
+def get_user_collection(user_id: int) -> str:
+    """Определяет, к какой коллекции имеет доступ пользователь"""
+    for collection, users in COLLECTIONS.items():
+        if user_id in users:
+            return collection
+    return None
+
+def get_main_keyboard(user_id: int = None):
     """Создает основную клавиатуру"""
     keyboard = [
-        [KeyboardButton("📋 Доступные инструменты")],
-        [KeyboardButton("📚 Загрузить документ")],
-        [KeyboardButton("📄 Список документов")]
+        [KeyboardButton("/tools_list")],
+        [KeyboardButton("/docs_list")]
     ]
+    
+    # Добавляем кнопку загрузки только для пользователей с правами
+    if get_user_collection(user_id):
+        keyboard.insert(1, [KeyboardButton("/load_doc")])
+    
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,9 +70,19 @@ async def tools_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def load_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /load_doc"""
     user_id = update.effective_user.id
+    collection = get_user_collection(user_id)
+    
+    # Проверяем, есть ли у пользователя доступ к какой-либо коллекции
+    if not collection:
+        await update.message.reply_text(
+            "⛔ У вас нет прав для загрузки документов. "
+            "Обратитесь к администратору для получения доступа."
+        )
+        return
+    
     user_states[user_id] = 'waiting_for_document'
     message_text = (
-        "📤 Пожалуйста, отправьте документ для загрузки.\n"
+        f"📤 Пожалуйста, отправьте документ для загрузки в коллекцию {collection.upper()}.\n"
         "Поддерживаемые форматы: PDF, DOC, DOCX, TXT"
     )
     await update.message.reply_text(message_text)
@@ -72,11 +103,20 @@ async def docs_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик получения документов"""
     user_id = update.effective_user.id
+    collection = get_user_collection(user_id)
+    
+    # Проверяем, есть ли у пользователя доступ к какой-либо коллекции
+    if not collection:
+        await update.message.reply_text(
+            "⛔ У вас нет прав для загрузки документов. "
+            "Обратитесь к администратору для получения доступа."
+        )
+        return
     
     # Проверяем, ожидаем ли мы документ от этого пользователя
     if user_id not in user_states or user_states[user_id] != 'waiting_for_document':
         await update.message.reply_text(
-            "❌ Пожалуйста, сначала нажмите кнопку '📚 Загрузить документ' или используйте команду /load_doc"
+            "❌ Пожалуйста, сначала нажмите кнопку '/load_doc' или используйте команду /load_doc"
         )
         return
     
@@ -101,8 +141,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(file_path)
         
         # Обрабатываем документ
-        if process_document(file_path):
-            await update.message.reply_text(f"✅ Документ успешно обработан: {file_name}")
+        if process_document(file_path, collection=collection):
+            await update.message.reply_text(f"✅ Документ успешно обработан и добавлен в коллекцию {collection.upper()}: {file_name}")
         else:
             await update.message.reply_text("❌ Ошибка при обработке документа")
         

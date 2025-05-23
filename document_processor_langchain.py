@@ -32,10 +32,20 @@ embeddings = HuggingFaceEmbeddings(
     model_name=EMBEDDING_MODEL,
     model_kwargs={'device': 'cpu'}
 )
-vectorstore = Chroma(
-persist_directory=PERSIST_DIR,
-embedding_function=embeddings
-)
+
+# Создаем словарь для хранения векторных хранилищ для разных коллекций
+vectorstores = {}
+
+def get_vectorstore(collection: str) -> Chroma:
+    """Получает или создает векторное хранилище для указанной коллекции"""
+    if collection not in vectorstores:
+        vectorstores[collection] = Chroma(
+            collection_name=collection,
+            persist_directory=PERSIST_DIR,
+            embedding_function=embeddings
+        )
+    return vectorstores[collection]
+
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=CHUNK_SIZE,
     chunk_overlap=CHUNK_OVERLAP,
@@ -43,13 +53,14 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""]
 )
 
-def filter_duplicates(docs: List[Document], db: Chroma) -> List[Document]:
+def filter_duplicates(docs: List[Document], collection: str) -> List[Document]:
     """Фильтрует документы, уже существующие в базе"""
     existing_hashes = set()
+    vectorstore = get_vectorstore(collection)
 
     # Получаем хеши существующих документов
     if os.path.exists(PERSIST_DIR):
-        existing_data = db.get()  # Получаем все данные из базы
+        existing_data = vectorstore.get()  # Получаем все данные из базы
         for metadata in existing_data["metadatas"]:
             if "doc_hash" in metadata:
                 existing_hashes.add(metadata["doc_hash"])
@@ -97,7 +108,7 @@ def load_document(file_path: str) -> List[Dict]:
         logger.error(f"Ошибка при загрузке документа {file_path}: {str(e)}")
         return []
 
-def process_document(file_path: str) -> bool:
+def process_document(file_path: str, collection: str) -> bool:
     """Обработка документа и сохранение в ChromaDB."""
     try:        
         # Загрузка и разбиение документа
@@ -106,12 +117,14 @@ def process_document(file_path: str) -> bool:
             return False
         
         # Фильтрация дубликатов
-        unique_splits = filter_duplicates(splits, vectorstore)
+        unique_splits = filter_duplicates(splits, collection)
         if not unique_splits:
             return False
         
         # Добавление уникальных документов в векторное хранилище
+        vectorstore = get_vectorstore(collection)
         vectorstore.add_documents(unique_splits)
+        vectorstore.persist()
         
         return True
         
@@ -119,9 +132,12 @@ def process_document(file_path: str) -> bool:
         logger.error(f"Ошибка при обработке документа: {str(e)}")
         return False
 
-def search_documents(query: str, n_results: int = 5) -> List[Dict]:
+def search_documents(query: str, collection: str, n_results: int = 5) -> List[Dict]:
     """Поиск по документам."""
     try:
+        # Получаем векторное хранилище для указанной коллекции
+        vectorstore = get_vectorstore(collection)
+        
         # Поиск в векторном хранилище
         results = vectorstore.similarity_search_with_score(
             query,
@@ -143,9 +159,10 @@ def search_documents(query: str, n_results: int = 5) -> List[Dict]:
         logger.error(f"Ошибка при поиске документов: {e}")
         return []
 
-def delete_document(document_id: str) -> bool:
+def delete_document(document_id: str, collection: str) -> bool:
     """Удаление документа из базы данных."""
     try:
+        vectorstore = get_vectorstore(collection)
         # Удаление документов по метаданным
         vectorstore.delete(
             filter={"source": document_id}
@@ -159,16 +176,44 @@ def delete_document(document_id: str) -> bool:
         logger.error(f"Ошибка при удалении документа: {e}")
         return False
 
-def get_document_info() -> Dict:
+def get_document_info(collection: str = None) -> Dict:
     """Получение информации о сохраненных документах."""
     try:
-        collection = vectorstore.get()
-        if not collection or not collection['documents']:
+        if collection:
+            # Получаем информацию для конкретной коллекции
+            vectorstore = get_vectorstore(collection)
+            collection_data = vectorstore.get()
+        else:
+            # Получаем информацию по всем коллекциям
+            all_documents = []
+            total_documents = 0
+            for coll in vectorstores.keys():
+                vectorstore = get_vectorstore(coll)
+                collection_data = vectorstore.get()
+                if collection_data and collection_data['documents']:
+                    sources = set()
+                    for metadata in collection_data['metadatas']:
+                        sources.add(metadata['source'])
+                    total_documents += len(sources)
+                    all_documents.extend([
+                        {
+                            "source": source,
+                            "collection": coll,
+                            "chunks": len([m for m in collection_data['metadatas'] if m['source'] == source])
+                        }
+                        for source in sources
+                    ])
+            return {
+                "total_documents": total_documents,
+                "documents": all_documents
+            }
+
+        if not collection_data or not collection_data['documents']:
             return {"total_documents": 0, "documents": []}
         
         # Подсчет уникальных документов по источнику
         sources = set()
-        for metadata in collection['metadatas']:
+        for metadata in collection_data['metadatas']:
             sources.add(metadata['source'])
         
         return {
@@ -176,7 +221,7 @@ def get_document_info() -> Dict:
             "documents": [
                 {
                     "source": source,
-                    "chunks": len([m for m in collection['metadatas'] if m['source'] == source])
+                    "chunks": len([m for m in collection_data['metadatas'] if m['source'] == source])
                 }
                 for source in sources
             ]
