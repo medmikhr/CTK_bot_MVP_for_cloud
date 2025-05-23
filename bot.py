@@ -3,6 +3,7 @@ import logging
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from document_processor_langchain import process_document, search_documents, get_document_info
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -19,13 +20,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправляет сообщение при выполнении команды /start."""
     # Создаем клавиатуру с кнопками
     keyboard = [
-        [KeyboardButton("📋 Список инструментов"), KeyboardButton("📄 Загрузить документ")]
+        [KeyboardButton("📋 Список инструментов"), KeyboardButton("📄 Загрузить документ")],
+        [KeyboardButton("📊 Информация о документах")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        'Привет! Я бот, который может обрабатывать различные типы сообщений.\n'
-        'Отправьте мне текст, фото, документ или стикер, и я отвечу!',
+        'Привет! Я бот для работы с документами.\n'
+        'Я могу:\n'
+        '• Загружать и обрабатывать документы (PDF, DOC, DOCX, TXT)\n'
+        '• Искать информацию в загруженных документах\n'
+        '• Показывать статистику по документам',
         reply_markup=reply_markup
     )
 
@@ -33,53 +38,88 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает текстовые сообщения."""
     text = update.message.text
-    await update.message.reply_text(f'Вы отправили текст: {text}')
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает сообщения с фотографиями."""
-    photo = update.message.photo[-1]  # Получаем фото наилучшего качества
-    await update.message.reply_text(
-        f'Вы отправили фото!\n'
-        f'Размер файла: {photo.file_size} байт\n'
-        f'Разрешение: {photo.width}x{photo.height}'
-    )
+    
+    if text == "📋 Список инструментов":
+        tools_list = """
+📋 Доступные инструменты:
+1. 📄 Загрузка документов (PDF, DOC, DOCX, TXT)
+2. 🔍 Поиск по документам (просто отправьте текст)
+3. 📊 Просмотр информации о загруженных документах
+        """
+        await update.message.reply_text(tools_list)
+    elif text == "📄 Загрузить документ":
+        await update.message.reply_text(
+            "Пожалуйста, отправьте документ, который хотите загрузить.\n"
+            "Поддерживаемые форматы: PDF, DOC, DOCX, TXT"
+        )
+    elif text == "📊 Информация о документах":
+        info = get_document_info()
+        if info["total_documents"] > 0:
+            response = f"📊 Всего документов: {info['total_documents']}\n\n"
+            for doc in info["documents"]:
+                response += f"📄 {os.path.basename(doc['source'])}\n"
+                response += f"   Чанков: {doc['chunks']}\n\n"
+        else:
+            response = "📭 В базе пока нет документов"
+        await update.message.reply_text(response)
+    else:
+        # Поиск по документам
+        results = search_documents(text)
+        if results:
+            response = "🔍 Результаты поиска:\n\n"
+            for i, result in enumerate(results, 1):
+                response += f"{i}. {result['text'][:200]}...\n"
+                response += f"   Источник: {os.path.basename(result['metadata']['source'])}\n"
+                response += f"   Релевантность: {result['score']:.2f}\n\n"
+            await update.message.reply_text(response)
+        else:
+            await update.message.reply_text(
+                "🔍 По вашему запросу ничего не найдено.\n"
+                "Попробуйте изменить формулировку или загрузите новые документы."
+            )
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает сообщения с документами."""
     document = update.message.document
-    await update.message.reply_text(
-        f'Вы отправили документ!\n'
-        f'Имя файла: {document.file_name}\n'
-        f'Тип файла: {document.mime_type}\n'
-        f'Размер файла: {document.file_size} байт'
-    )
+    file_name = document.file_name
+    
+    # Проверка расширения файла
+    allowed_extensions = ['.pdf', '.doc', '.docx', '.txt']
+    file_extension = os.path.splitext(file_name)[1].lower()
+    
+    if file_extension not in allowed_extensions:
+        await update.message.reply_text(
+            f"❌ Неподдерживаемый формат файла: {file_extension}\n"
+            f"Поддерживаемые форматы: {', '.join(allowed_extensions)}"
+        )
+        return
 
-async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает сообщения со стикерами."""
-    sticker = update.message.sticker
-    await update.message.reply_text(
-        f'Вы отправили стикер!\n'
-        f'ID стикера: {sticker.file_id}\n'
-        f'Эмодзи: {sticker.emoji}'
-    )
-
-async def handle_tools_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает нажатие кнопки 'Список инструментов'."""
-    tools_list = """
-📋 Доступные инструменты:
-1. Обработка текста
-2. Обработка фото
-3. Обработка документов
-4. Обработка стикеров
-    """
-    await update.message.reply_text(tools_list)
-
-async def handle_load_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает нажатие кнопки 'Загрузить документ'."""
-    await update.message.reply_text(
-        "Пожалуйста, отправьте документ, который хотите загрузить.\n"
-        "Поддерживаемые форматы: PDF, DOC, DOCX, TXT"
-    )
+    # Скачивание файла
+    file = await context.bot.get_file(document.file_id)
+    file_path = f"temp_{file_name}"
+    await file.download_to_drive(file_path)
+    
+    # Обработка документа
+    success = process_document(file_path)
+    
+    # Удаление временного файла
+    try:
+        os.remove(file_path)
+    except:
+        pass
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ Документ успешно обработан и сохранен!\n"
+            f"📄 Имя файла: {file_name}\n"
+            f"📊 Тип файла: {document.mime_type}\n"
+            f"📦 Размер файла: {document.file_size} байт"
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Произошла ошибка при обработке документа.\n"
+            "Пожалуйста, проверьте формат файла и попробуйте снова."
+        )
 
 def main():
     """Запускает бота."""
@@ -88,17 +128,10 @@ def main():
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
 
     # Добавляем обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    application.add_handler(MessageHandler(filters.STICKER, handle_sticker))
-
-    # Добавляем обработчики кнопок
-    application.add_handler(MessageHandler(filters.Regex("^📋 Список инструментов$"), handle_tools_list))
-    application.add_handler(MessageHandler(filters.Regex("^📄 Загрузить документ$"), handle_load_doc))
 
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES)
