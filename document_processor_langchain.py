@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Set
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -9,29 +9,60 @@ from langchain_community.document_loaders import (
     TextLoader
 )
 import logging
+from datetime import datetime, timedelta
+import hashlib
+from langchain.schema import Document
+import traceback
+
+# Конфигурация
+PERSIST_DIR = "chroma_db"  # Директория для хранения базы данных Chroma
+EMBEDDING_MODEL = "cointegrated/rubert-tiny2"  # Модель для эмбеддингов
+CHUNK_SIZE = 1000  # Размер чанка при разбиении текста
+CHUNK_OVERLAP = 200  # Перекрытие между чанками
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Инициализация глобальных компонентов
+# Глобальные переменные
 embeddings = HuggingFaceEmbeddings(
-    model_name="sberbank-ai/sbert_large_nlu_ru",
+    model_name=EMBEDDING_MODEL,
     model_kwargs={'device': 'cpu'}
 )
-
+vectorstore = Chroma(
+persist_directory=PERSIST_DIR,
+embedding_function=embeddings
+)
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
+    chunk_size=CHUNK_SIZE,
+    chunk_overlap=CHUNK_OVERLAP,
     length_function=len,
     separators=["\n\n", "\n", " ", ""]
 )
 
-# Инициализация базы данных Chroma
-vectorstore = Chroma(
-    persist_directory="chroma_db",
-    embedding_function=embeddings
-)
+def filter_duplicates(docs: List[Document], db: Chroma) -> List[Document]:
+    """Фильтрует документы, уже существующие в базе"""
+    existing_hashes = set()
+
+    # Получаем хеши существующих документов
+    if os.path.exists(PERSIST_DIR):
+        existing_data = db.get()  # Получаем все данные из базы
+        for metadata in existing_data["metadatas"]:
+            if "doc_hash" in metadata:
+                existing_hashes.add(metadata["doc_hash"])
+
+    # Фильтрация новых документов
+    unique_docs = []
+    for doc in docs:
+        content_hash = hashlib.md5(doc.page_content.encode()).hexdigest()
+        if content_hash not in existing_hashes:
+            doc.metadata["doc_hash"] = content_hash  # Добавляем хеш в метаданные
+            unique_docs.append(doc)
+
+    return unique_docs
 
 def load_document(file_path: str) -> List[Dict]:
     """Загрузка документа в зависимости от его типа."""
@@ -63,26 +94,29 @@ def load_document(file_path: str) -> List[Dict]:
         return splits
         
     except Exception as e:
-        logger.error(f"Ошибка при загрузке документа {file_path}: {e}")
+        logger.error(f"Ошибка при загрузке документа {file_path}: {str(e)}")
         return []
 
 def process_document(file_path: str) -> bool:
     """Обработка документа и сохранение в ChromaDB."""
-    try:
+    try:        
         # Загрузка и разбиение документа
         splits = load_document(file_path)
         if not splits:
             return False
         
-        # Добавление документов в векторное хранилище
-        vectorstore.add_documents(splits)
-        vectorstore.persist()
+        # Фильтрация дубликатов
+        unique_splits = filter_duplicates(splits, vectorstore)
+        if not unique_splits:
+            return False
         
-        logger.info(f"Документ успешно обработан и сохранен: {file_path}")
+        # Добавление уникальных документов в векторное хранилище
+        vectorstore.add_documents(unique_splits)
+        
         return True
         
     except Exception as e:
-        logger.error(f"Ошибка при обработке документа: {e}")
+        logger.error(f"Ошибка при обработке документа: {str(e)}")
         return False
 
 def search_documents(query: str, n_results: int = 5) -> List[Dict]:
