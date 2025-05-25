@@ -229,4 +229,15 @@ def get_document_info(collection: str = None) -> Dict:
         
     except Exception as e:
         logger.error(f"Ошибка при получении информации о документах: {e}")
-        return {"total_documents": 0, "documents": []} 
+        return {"total_documents": 0, "documents": []}
+
+if __name__ == "__main__":
+    # Пример использования process_document
+    file_path = "example.pdf"  # Путь к вашему документу
+    collection_name = "dama"  # Имя коллекции для хранения документов
+    
+    success = process_document(file_path, collection_name)
+    if success:
+        print(f"Документ {file_path} успешно обработан и добавлен в коллекцию {collection_name}")
+    else:
+        print(f"Ошибка при обработке документа {file_path}") 
