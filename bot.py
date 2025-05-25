@@ -1,6 +1,6 @@
 import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, Bot, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from dotenv import load_dotenv
 from document_processor_langchain import process_document, get_document_info
@@ -55,11 +55,12 @@ def get_main_keyboard(user_id: int = None):
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     """Обработчик команды /start"""
     help_text = (
         "Привет! я Data Governance бот для повышения культуры работы с данными."
     )
-    await update.message.reply_text(help_text, reply_markup=get_main_keyboard())
+    await update.message.reply_text(help_text, reply_markup=get_main_keyboard(user_id))
 
 async def tools_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /tools_list"""
