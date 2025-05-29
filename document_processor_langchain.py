@@ -124,7 +124,6 @@ def process_document(file_path: str, collection: str) -> bool:
         # Добавление уникальных документов в векторное хранилище
         vectorstore = get_vectorstore(collection)
         vectorstore.add_documents(unique_splits)
-        vectorstore.persist()
         
         return True
         
@@ -167,7 +166,6 @@ def delete_document(document_id: str, collection: str) -> bool:
         vectorstore.delete(
             filter={"source": document_id}
         )
-        vectorstore.persist()
         
         logger.info(f"Документ успешно удален: {document_id}")
         return True
@@ -233,7 +231,7 @@ def get_document_info(collection: str = None) -> Dict:
 
 if __name__ == "__main__":
     # Пример использования process_document
-    file_path = "example.pdf"  # Путь к вашему документу
+    file_path = "C:/Users/Administrator/Documents/LangFlow/ctk_pdf_for_Giga/DAMA-DMBOK (2020).pdf"  # Путь к вашему документу
     collection_name = "dama"  # Имя коллекции для хранения документов
     
     success = process_document(file_path, collection_name)
