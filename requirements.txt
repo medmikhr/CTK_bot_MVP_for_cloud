@@ -104,7 +104,7 @@ pyproject_hooks==1.2.0
 pyreadline3==3.5.4
 python-dateutil==2.9.0.post0
 python-docx==1.1.2
-python-dotenv==1.1.0
+python-dotenv==1.0.1
 python-telegram-bot==22.1
 PyYAML==6.0.2
 referencing==0.36.2
@@ -147,3 +147,6 @@ xxhash==3.5.0
 yarl==1.20.0
 zipp==3.21.0
 zstandard==0.23.0
+mcp==1.9.2
+uvx==1.0.0
+mcp-proxy==0.8.0
