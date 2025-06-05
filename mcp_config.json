@@ -7,10 +7,22 @@
         "http://127.0.0.1:7860/api/v1/mcp/project/d7a0ea31-8a14-4f5b-9e10-f2fce008bcc3/sse"
       ]
     },
-    "vector-search-server": {
+    "vector-search-server-stdio": {
+      "type": "stdio",
+      "command": "python",
       "args": [
-        "http://localhost:8000"
-      ]
+        "/Users/denispukinov/Documents/Работа /bot_dzo/CTK_bot_MVP_for_cloud/standard_mcp_server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/denispukinov/Documents/Работа /bot_dzo/CTK_bot_MVP_for_cloud"
+      },
+      "description": "MCP Vector Search Server via stdio (subprocess)"
+    },
+    "vector-search-server-http": {
+      "type": "streamable_http",
+      "url": "http://localhost:8080/mcp",
+      "healthCheck": "http://localhost:8080/health",
+      "description": "MCP Vector Search Server via Streamable HTTP (service on port)"
     }
   }
 } 
